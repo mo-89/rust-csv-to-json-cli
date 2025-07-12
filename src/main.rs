@@ -75,29 +75,5 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     convert_dynamic(&args.input, args.output.as_deref())?;
 
-    // let file = File::open(&args.input)?;
-    // let mut reader = Reader::from_reader(file);
-
-    // let mut people: Vec<Person> = Vec::new();
-
-    // for result in reader.deserialize() {
-    //     let person: Person = result?;
-    //     people.push(person);
-    // }
-
-    // let json_output = serde_json::to_string_pretty(&people)?;
-
-    // match args.output {
-    //     Some(output_path) => {
-    //         std::fs::write(&output_path, json_output)?;
-    //         println!("JSONファイルを保存しました：{}", output_path);
-    //     }
-    //     None => {
-    //         println!("JSON出力：");
-    //         println!("{}", json_output);
-    //     }
-    // }
-
-    // println!("変換完了");
     Ok(())
 }
