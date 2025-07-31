@@ -1,9 +1,10 @@
 use csv::Reader;
-use serde::{Deserialize ,Serialize};
 use std::fs::File;
 use clap::Parser;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
+
+// cargo run -- --input sample.csv --output result.json --stats
 
 #[derive(Parser)]
 #[command(name = "csv-to-json")]
@@ -14,6 +15,9 @@ struct Args {
 
     #[arg(short, long)]
     output: Option<String>,
+
+    #[arg(short, long, help = "統計情報を表示する")]
+    stats: bool,
 }
 
 #[derive(Error, Debug)]
@@ -37,7 +41,73 @@ enum ConversionError {
     FileWriteError { path: String },
 }
 
-fn convert_dynamic(input_path: &str, output_path: Option<&str>) -> Result<(), ConversionError> {
+#[derive(Debug)]
+struct CsvStats {
+    total_rows: usize,
+    total_columns: usize,
+    empty_cells: usize,
+    column_unique_counts: HashMap<String, usize>
+}
+
+impl CsvStats {
+    fn new() -> Self {
+        CsvStats {
+            total_rows: 0,
+            total_columns: 0,
+            empty_cells: 0,
+            column_unique_counts: HashMap::new(),
+        }
+    }
+
+    fn display(&self) {
+        println!("データ統計情報");
+        println!("---------------------------");
+        println!("総行数：{}行", self.total_rows);
+        println!("列数：{}行", self.total_columns);
+        println!("空のセル：{}個", self.empty_cells);
+        println!("ユニークな値の数：");
+
+        for (column, count) in &self.column_unique_counts {
+            println!("   - {}: {}個", column, count);
+        }
+        println!("---------------------------");
+    }
+}
+
+fn calculate_stats(data: &[HashMap<String, String>], headers: &csv::StringRecord) -> CsvStats {
+    let mut stats = CsvStats::new();
+
+    stats.total_rows =data.len();
+    stats.total_columns = headers.len();
+
+let mut column_unique_values: HashMap<String, HashSet<String>> = HashMap::new();
+
+for header in headers.iter() {
+    column_unique_values.insert(header.to_string(), HashSet::new());
+}
+
+
+    for row in data {
+        for (column, value) in row {
+
+            if value.trim().is_empty() {
+                stats.empty_cells += 1;
+            }
+
+            if let Some(unique_set) = column_unique_values.get_mut(column) {
+                unique_set.insert(value.clone());
+            }
+        }
+    }
+
+    for (column, unique_set) in column_unique_values {
+        stats.column_unique_counts.insert(column, unique_set.len());
+    }
+
+    stats
+}
+
+fn convert_dynamic(input_path: &str, output_path: Option<&str>, show_stats: bool) -> Result<(), ConversionError> {
     // let file = File::open(input_path)?;
 
     let file = File::open(input_path).map_err(|e| {
@@ -80,6 +150,11 @@ fn convert_dynamic(input_path: &str, output_path: Option<&str>) -> Result<(), Co
         println!("...(他{}行)", all_rows.len() -3);
     }
 
+    if show_stats {
+        let stats = calculate_stats(&all_rows, &headers);
+        stats.display();
+    }
+
     let json_output = serde_json::to_string_pretty(&all_rows).map_err(|_| ConversionError::JsonConversionError)?;
 
     match output_path {
@@ -102,7 +177,7 @@ fn main() {
     println!("csv 読み込み開始 ファイル: {}", args.input);
     println!("─────────────────────────────────────");
 
-    if let Err(e) = convert_dynamic(&args.input, args.output.as_deref()) {
+    if let Err(e) = convert_dynamic(&args.input, args.output.as_deref(), args.stats) {
         eprintln!("\n{}", e);
         std::process::exit(1);
     };
