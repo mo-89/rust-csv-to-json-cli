@@ -80,12 +80,11 @@ fn calculate_stats(data: &[HashMap<String, String>], headers: &csv::StringRecord
     stats.total_rows =data.len();
     stats.total_columns = headers.len();
 
-let mut column_unique_values: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut column_unique_values: HashMap<String, HashSet<String>> = HashMap::new();
 
-for header in headers.iter() {
-    column_unique_values.insert(header.to_string(), HashSet::new());
-}
-
+    for header in headers.iter() {
+        column_unique_values.insert(header.to_string(), HashSet::new());
+    }
 
     for row in data {
         for (column, value) in row {
