@@ -46,7 +46,15 @@ struct CsvStats {
     total_rows: usize,
     total_columns: usize,
     empty_cells: usize,
-    column_unique_counts: HashMap<String, usize>
+    column_unique_counts: HashMap<String, usize>,
+    column_data_types: HashMap<String, DataTypeInfo>
+}
+
+#[derive(Debug)]
+struct DataTypeInfo {
+    numeric_count: usize,
+    text_count: usize,
+    empty_count: usize,
 }
 
 impl CsvStats {
@@ -56,6 +64,7 @@ impl CsvStats {
             total_columns: 0,
             empty_cells: 0,
             column_unique_counts: HashMap::new(),
+            column_data_types: HashMap::new(),
         }
     }
 
@@ -70,9 +79,30 @@ impl CsvStats {
         for (column, count) in &self.column_unique_counts {
             println!("   - {}: {}個", column, count);
         }
+
+        println!("📈 データ型別統計:");
+        for (column, type_info) in &self.column_data_types {
+            let total = type_info.numeric_count + type_info.text_count + type_info.empty_count;
+            if total > 0 {
+                let numeric_percent = (type_info.numeric_count as f64 / total as f64 * 100.0) as usize;
+                let text_percent = (type_info.text_count as f64 / total as f64 * 100.0) as usize;
+                
+                println!("   - {}: 数値{}個({}%) / 文字列{}個({}%) / 空{}個", 
+                    column, 
+                    type_info.numeric_count, numeric_percent,
+                    type_info.text_count, text_percent,
+                    type_info.empty_count
+                );
+            }
+        }
+
         println!("---------------------------");
     }
 }
+
+fn is_numeric_like(value: &str) -> bool {
+    value.trim().parse::<f64>().is_ok()
+} 
 
 fn calculate_stats(data: &[HashMap<String, String>], headers: &csv::StringRecord) -> CsvStats {
     let mut stats = CsvStats::new();
@@ -84,6 +114,11 @@ fn calculate_stats(data: &[HashMap<String, String>], headers: &csv::StringRecord
 
     for header in headers.iter() {
         column_unique_values.insert(header.to_string(), HashSet::new());
+        stats.column_data_types.insert(header.to_string(), DataTypeInfo {
+            numeric_count: 0,
+            text_count: 0,
+            empty_count: 0,
+        });
     }
 
     for row in data {
@@ -91,6 +126,18 @@ fn calculate_stats(data: &[HashMap<String, String>], headers: &csv::StringRecord
 
             if value.trim().is_empty() {
                 stats.empty_cells += 1;
+
+                if let Some(type_info) = stats.column_data_types.get_mut(column) {
+                    type_info.empty_count += 1;
+                }
+            } else {
+                if let Some(type_info) = stats.column_data_types.get_mut(column) {                
+                    if is_numeric_like(value) {
+                        type_info.numeric_count += 1;
+                    } else {
+                        type_info.text_count += 1;
+                    }
+                }
             }
 
             if let Some(unique_set) = column_unique_values.get_mut(column) {
