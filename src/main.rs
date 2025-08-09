@@ -3,6 +3,7 @@ use std::fs::File;
 use clap::Parser;
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
+use indicatif::{ProgressBar, ProgressStyle};
 
 // cargo run -- --input sample.csv --output result.json --stats
 
@@ -18,6 +19,9 @@ struct Args {
 
     #[arg(short, long, help = "統計情報を表示する")]
     stats: bool,
+
+    #[arg(short, long, help="進捗バーを表示する")]
+    progress: bool,
 }
 
 #[derive(Error, Debug)]
@@ -69,18 +73,18 @@ impl CsvStats {
     }
 
     fn display(&self) {
-        println!("データ統計情報");
+        println!("\n📊 データ統計情報");
         println!("---------------------------");
         println!("総行数：{}行", self.total_rows);
-        println!("列数：{}行", self.total_columns);
+        println!("列数：{}列", self.total_columns);
         println!("空のセル：{}個", self.empty_cells);
-        println!("ユニークな値の数：");
+        println!("\n📋 ユニークな値の数：");
 
         for (column, count) in &self.column_unique_counts {
             println!("   - {}: {}個", column, count);
         }
 
-        println!("📈 データ型別統計:");
+        println!("\n📈 データ型別統計:");
         for (column, type_info) in &self.column_data_types {
             let total = type_info.numeric_count + type_info.text_count + type_info.empty_count;
             if total > 0 {
@@ -104,13 +108,19 @@ fn is_numeric_like(value: &str) -> bool {
     value.trim().parse::<f64>().is_ok()
 } 
 
-fn calculate_stats(data: &[HashMap<String, String>], headers: &csv::StringRecord) -> CsvStats {
+fn calculate_stats(data: &[HashMap<String, String>], headers: &csv::StringRecord, progress_bar: Option<&ProgressBar>) -> CsvStats {
     let mut stats = CsvStats::new();
 
     stats.total_rows =data.len();
     stats.total_columns = headers.len();
 
     let mut column_unique_values: HashMap<String, HashSet<String>> = HashMap::new();
+
+    if let Some(pb) = progress_bar {
+        pb.set_message("📊 統計情報を計算中...");
+        pb.set_length(data.len() as u64);
+        pb.set_position(0);
+    }
 
     for header in headers.iter() {
         column_unique_values.insert(header.to_string(), HashSet::new());
@@ -121,9 +131,8 @@ fn calculate_stats(data: &[HashMap<String, String>], headers: &csv::StringRecord
         });
     }
 
-    for row in data {
+    for (i, row) in data.iter().enumerate() {
         for (column, value) in row {
-
             if value.trim().is_empty() {
                 stats.empty_cells += 1;
 
@@ -144,6 +153,9 @@ fn calculate_stats(data: &[HashMap<String, String>], headers: &csv::StringRecord
                 unique_set.insert(value.clone());
             }
         }
+        if let Some(pb) = progress_bar {
+            pb.set_position((i + 1) as u64);
+        }
     }
 
     for (column, unique_set) in column_unique_values {
@@ -153,8 +165,20 @@ fn calculate_stats(data: &[HashMap<String, String>], headers: &csv::StringRecord
     stats
 }
 
-fn convert_dynamic(input_path: &str, output_path: Option<&str>, show_stats: bool) -> Result<(), ConversionError> {
-    // let file = File::open(input_path)?;
+fn convert_dynamic(input_path: &str, output_path: Option<&str>, show_stats: bool, show_progress: bool) -> Result<(), ConversionError> {
+
+    let progress_bar = if show_progress {
+        let pb = ProgressBar::new(0);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("🚀 {msg} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({percent}%) ETA: {eta}")
+                .unwrap()
+                .progress_chars("##-")
+        );
+        Some(pb)
+    } else {
+        None
+    };
 
     let file = File::open(input_path).map_err(|e| {
         match e.kind() {
@@ -169,7 +193,12 @@ fn convert_dynamic(input_path: &str, output_path: Option<&str>, show_stats: bool
     let mut reader = Reader::from_reader(file);
 
     let headers = reader.headers().map_err(|_| ConversionError::CsvParseError)?.clone();
-    println!("ヘッダー読み込み完了：{:?}", headers);
+    println!("✅ ヘッダー読み込み完了：{:?}", headers);
+
+    if let Some(pb) = &progress_bar {
+        pb.set_message("📖 CSVデータを読み込み中...");
+        pb.set_length(0);  // 行数不明のため0に設定
+    }
 
     let mut all_rows: Vec<HashMap<String, String>> = Vec::new();
 
@@ -186,30 +215,55 @@ fn convert_dynamic(input_path: &str, output_path: Option<&str>, show_stats: bool
         }
 
         all_rows.push(row_map);
+
+        if let Some(pb) = &progress_bar {
+            pb.inc(1);
+            if line_num % 100 == 0 {  // 100行ごとにメッセージ更新
+                let message = format!("📖 {}行読み込み中...", line_num + 1);
+                pb.set_message(message);  // 🔧 ライフタイム修正: 変数に保存してから渡す
+            }
+        }
     }
 
-    println!("全{}行のデータ読み込み完了:", all_rows.len());
+    if let Some(pb) = &progress_bar {
+        let message = format!("✅ CSV読み込み完了！ ({}行)", all_rows.len());
+        pb.finish_with_message(message);  // 🔧 ライフタイム修正: 変数に保存してから渡す
+    }
+
+    println!("📊 全{}行のデータ読み込み完了:", all_rows.len());
     for (i, row) in all_rows.iter().enumerate().take(3) {
-        println!("{}行目:{:?}", i + 1, row)
+        println!("   {}行目:{:?}", i + 1, row)
     }
     if all_rows.len() > 3 {
-        println!("...(他{}行)", all_rows.len() -3);
+        println!("   ...(他{}行)", all_rows.len() -3);
     }
 
     if show_stats {
-        let stats = calculate_stats(&all_rows, &headers);
+        let stats = calculate_stats(&all_rows, &headers, progress_bar.as_ref());
         stats.display();
     }
+
+    if let Some(pb) = &progress_bar {
+        pb.reset();
+        pb.set_message("🔄 JSON変換中...");
+        pb.set_length(1);
+        pb.set_position(0);
+    }
+
+    if let Some(pb) = &progress_bar {
+        pb.set_position(1);
+        pb.finish_with_message("✅ JSON変換完了！");
+    }    
 
     let json_output = serde_json::to_string_pretty(&all_rows).map_err(|_| ConversionError::JsonConversionError)?;
 
     match output_path {
         Some(path) => {
             std::fs::write(path, json_output).map_err(|_| ConversionError::FileWriteError { path: path.to_string(), })?;
-            println!("JSONファイルを保存しました：{}", path);
+            println!("💾 JSONファイルを保存しました：{}", path);
         }
         None => {
-            println!("JSON出力：");
+            println!("📄 JSON出力：");
             println!("{}", json_output);
         }
     }
@@ -220,14 +274,21 @@ fn convert_dynamic(input_path: &str, output_path: Option<&str>, show_stats: bool
 fn main() {
     let args = Args::parse();
 
+    println!("🚀 CSV to JSON 変換ツール開始");
     println!("csv 読み込み開始 ファイル: {}", args.input);
+    if args.progress {
+        println!("📊 進捗バー表示: ON");
+    }
+    if args.stats {
+        println!("📈 統計情報表示: ON");
+    }
     println!("─────────────────────────────────────");
 
-    if let Err(e) = convert_dynamic(&args.input, args.output.as_deref(), args.stats) {
-        eprintln!("\n{}", e);
+    if let Err(e) = convert_dynamic(&args.input, args.output.as_deref(), args.stats, args.progress) {
+        eprintln!("\n❌ {}", e);
         std::process::exit(1);
     };
 
     println!("─────────────────────────────────────");
-    println!("🎉 変換完了！お疲れ様でした〜");
+    println!("🎉 変換完了！お疲れ様でした〜✨");
 }
